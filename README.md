@@ -11,7 +11,7 @@
 - **System Resource Monitoring**: Dynamically adjusts computational load based on system resource usage.
 - **Data Drift and Model Degradation Handling**: Automatically detects and mitigates issues related to data drift or model performance degradation.
 
----
+
 
 ## Quick Start Guide
 
@@ -27,24 +27,24 @@ git clone https://github.com/pwnzersaurus/SENSE.git
 cd SENSE
 pip install -r requirements.txt
 
-3. Running SENSE
+### 3. Running SENSE
 
-For local data:
+- For local data:
 
 python sense.py --data_source path/to/your/data.csv --target_column your_target_column
 
-For URL-based data:
+- For URL-based data:
 
 python sense.py --data_source http://example.com/data.csv --target_column your_target_column
 
 
----
 
-Usage Examples
 
-Basic Data Analysis
+## Usage Examples
 
-Perform initial data analysis with SENSE's built-in functions:
+### Basic Data Analysis
+
+- Perform initial data analysis with SENSE's built-in functions:
 
 from sense import SENSE_Evolver
 
@@ -58,16 +58,18 @@ sense_system = SENSE_Evolver(state_size=10, action_size=4, input_dim=train_X.sha
 # Run SENSE for a few generations
 sense_system.evolve_population(sense_system.create_population(), (val_X, val_y), train_X)
 
-Advanced Scenario: Handling Data Drift
+## Advanced Scenario: Handling Data Drift
 
-This example shows how SENSE adapts to data drift:
+- This example shows how SENSE adapts to data drift:
 
 from sense import SENSE_Evolver
 
-# Assuming 'new_data' and 'old_data' are your datasets
+- Assuming 'new_data' and 'old_data' are your datasets
+
 sense_system = SENSE_Evolver(state_size=10, action_size=4, input_dim=new_data.shape[1], output_dim=1)
 
-# Check for drift
+- Check for drift
+
 if sense_system.check_data_drift(new_data, old_data):
     population = sense_system.create_population()  # Reset models due to drift
 else:
@@ -76,32 +78,30 @@ else:
 # Continue with model evolution or training
 
 
----
 
-Contributing to SENSE
+## Contributing to SENSE
 
 Contributions are welcomed! Please refer to our Contribution Guidelines for how to get involved.
 
 
----
 
-License
+## License
 
 SENSE is released under the MIT License. For more details, see the License file.
 
 
----
 
-Detailed Documentation
+
+## Detailed Documentation
 
 COMING SOON
 
----
 
-Note:
 
-Ensure your data source file or URL is accessible and contains the correct format (CSV with headers).
+## NOTE:
 
-Adjust parameters like state_size, action_size, etc., based on your specific problem domain.
+- Ensure your data source file or URL is accessible and contains the correct format (CSV with headers).
 
-The system is designed to run autonomously but can be further customized for specific use cases through the command-line arguments or programmatically.
+- Adjust parameters like state_size, action_size, etc., based on your specific problem domain.
+
+- The system is designed to run autonomously but can be further customized for specific use cases through the command-line arguments or programmatically.
