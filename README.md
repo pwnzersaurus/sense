@@ -25,17 +25,17 @@ Ensure you have the following installed:
 ```bash
 git clone https://github.com/pwnzersaurus/SENSE.git
 cd SENSE
-pip install -r requirements.txt
+pip install -r requirements.txt```
 
 ### 3. Running SENSE
 
 - For local data:
 
-python sense.py --data_source path/to/your/data.csv --target_column your_target_column
+```python sense.py --data_source path/to/your/data.csv --target_column your_target_column```
 
 - For URL-based data:
 
-python sense.py --data_source http://example.com/data.csv --target_column your_target_column
+```python sense.py --data_source http://example.com/data.csv --target_column your_target_column```
 
 
 
@@ -46,36 +46,37 @@ python sense.py --data_source http://example.com/data.csv --target_column your_t
 
 - Perform initial data analysis with SENSE's built-in functions:
 
-from sense import SENSE_Evolver
+```from sense import SENSE_Evolver```
 
 # Load and preprocess data
-data = SENSE_Evolver.load_data('path/to/your/data.csv', 'target_column')
-train_X, val_X, train_y, val_y = SENSE_Evolver.preprocess_data(data)
+```data = SENSE_Evolver.load_data('path/to/your/data.csv', 'target_column')
+train_X, val_X, train_y, val_y = SENSE_Evolver.preprocess_data(data)```
 
 # Initialize SENSE
-sense_system = SENSE_Evolver(state_size=10, action_size=4, input_dim=train_X.shape[1], output_dim=1)
+```sense_system = SENSE_Evolver(state_size=10, action_size=4, input_dim=train_X.shape[1], output_dim=1)```
 
 # Run SENSE for a few generations
-sense_system.evolve_population(sense_system.create_population(), (val_X, val_y), train_X)
+```sense_system.evolve_population(sense_system.create_population(), (val_X, val_y), train_X)```
 
 ## Advanced Scenario: Handling Data Drift
 
 - This example shows how SENSE adapts to data drift:
 
-from sense import SENSE_Evolver
+```from sense import SENSE_Evolver```
 
 - Assuming 'new_data' and 'old_data' are your datasets
 
-sense_system = SENSE_Evolver(state_size=10, action_size=4, input_dim=new_data.shape[1], output_dim=1)
+```sense_system = SENSE_Evolver(state_size=10, action_size=4, input_dim=new_data.shape[1], output_dim=1)```
 
 - Check for drift
 
-if sense_system.check_data_drift(new_data, old_data):
-    population = sense_system.create_population()  # Reset models due to drift
+```if sense_system.check_data_drift(new_data, old_data):
+    population = sense_system.create_population()
+ # Reset models due to drift
 else:
     population = sense_system.evolve_population(sense_system.create_population(), (val_X, val_y), new_data)
 
-# Continue with model evolution or training
+# Continue with model evolution or training```
 
 
 
