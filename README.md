@@ -30,9 +30,11 @@ Or for URL data:
 bash
 python sense.py --data_source http://example.com/data.csv --target_column your_target_column
 
-Usage Examples
-Basic Data Analysis
+Usage Examples:
+
+- Basic Data Analysis
 Perform initial data analysis with SENSE's built-in functions:
+
 python
 from sense import SENSE_Evolver
 
