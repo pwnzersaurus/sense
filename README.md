@@ -1,7 +1,7 @@
 # SENSE: Systematic Enhancement for Neural Selection and Evolution
 
 ## Introduction
-SENSE is a sophisticated AI framework that merges various machine learning techniques into a single, highly adaptive system. It's crafted for scenarios where data evolves, and models need to adapt autonomously over time.
+**SENSE** is a sophisticated AI framework that merges various machine learning techniques into a single, highly adaptive system. It's crafted for scenarios where data evolves, and models need to adapt autonomously over time.
 
 ## Key Features
 - **Evolutionary Algorithms**: Employs genetic algorithms for model optimization, ensuring models evolve with changing data landscapes.
@@ -11,31 +11,41 @@ SENSE is a sophisticated AI framework that merges various machine learning techn
 - **System Resource Monitoring**: Dynamically adjusts computational load based on system resource usage.
 - **Data Drift and Model Degradation Handling**: Automatically detects and mitigates issues related to data drift or model performance degradation.
 
+---
+
 ## Quick Start Guide
-1. **Prerequisites**:
-   - Python 3.6 or newer
-   - TensorFlow 2.x
-   - Additional libraries: numpy, scipy, pandas, requests, transformers, psutil
 
-2. **Installation**:
-   ```bash
-   git clone https://github.com/pwnzersaurus/SENSE.git
-   cd SENSE
-   pip install -r requirements.txt
+### 1. Prerequisites
+Ensure you have the following installed:
+- Python 3.6 or newer
+- TensorFlow 2.x
+- Additional libraries: `numpy`, `scipy`, `pandas`, `requests`, `transformers`, `psutil`
 
-Running SENSE:
-bash
+### 2. Installation
+```bash
+git clone https://github.com/pwnzersaurus/SENSE.git
+cd SENSE
+pip install -r requirements.txt
+
+3. Running SENSE
+
+For local data:
+
 python sense.py --data_source path/to/your/data.csv --target_column your_target_column
-Or for URL data:
-bash
+
+For URL-based data:
+
 python sense.py --data_source http://example.com/data.csv --target_column your_target_column
 
-Usage Examples:
 
-- Basic Data Analysis
+---
+
+Usage Examples
+
+Basic Data Analysis
+
 Perform initial data analysis with SENSE's built-in functions:
 
-python
 from sense import SENSE_Evolver
 
 # Load and preprocess data
@@ -49,8 +59,9 @@ sense_system = SENSE_Evolver(state_size=10, action_size=4, input_dim=train_X.sha
 sense_system.evolve_population(sense_system.create_population(), (val_X, val_y), train_X)
 
 Advanced Scenario: Handling Data Drift
+
 This example shows how SENSE adapts to data drift:
-python
+
 from sense import SENSE_Evolver
 
 # Assuming 'new_data' and 'old_data' are your datasets
@@ -64,16 +75,33 @@ else:
 
 # Continue with model evolution or training
 
+
+---
+
 Contributing to SENSE
-Contributions are welcomed! Please refer to our Contribution Guidelines (CONTRIBUTING.md) for how to get involved.
+
+Contributions are welcomed! Please refer to our Contribution Guidelines for how to get involved.
+
+
+---
 
 License
-SENSE is released under the MIT License. For more details, see the License file (LICENSE).
+
+SENSE is released under the MIT License. For more details, see the License file.
+
+
+---
 
 Detailed Documentation
-For in-depth documentation, including API references and tutorials, please check our Wiki.
 
-Note
+COMING SOON
+
+---
+
+Note:
+
 Ensure your data source file or URL is accessible and contains the correct format (CSV with headers).
+
 Adjust parameters like state_size, action_size, etc., based on your specific problem domain.
+
 The system is designed to run autonomously but can be further customized for specific use cases through the command-line arguments or programmatically.
