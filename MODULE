@@ -6,11 +6,84 @@ import psutil
 import tensorflow as tf
 from tensorflow.keras.layers import Dense, Dropout, LSTM
 from tensorflow.keras.models import Sequential
-from transformers import TFAutoModelForCausalLM, AutoTokenizer
+from tensorflow.keras.regularizers import l2
+from transformers import TFAutoModelForCausalLM, AutoTokenizer, AdamW
+import logging
+from typing import List, Tuple, Dict
+import pandas as pd
+import requests
+from io import StringIO
+import json
+from scipy.stats import ks_2samp
 
-# SARSA Agent with Epsilon-Greedy Strategy
+# Constants for SENSE
+MODEL_NAME = "gpt2"  # Example model, replace with actual model
+MAX_LENGTH = 512
+POPULATION_SIZE = 10
+MUTATION_RATE = 0.05
+SELECTION_TOP_K = 2
+DIVERSITY_RATE = 0.1
+BATCH_SIZE = 32
+EPOCHS = 1
+GENERATIONS = 10
+DRIFT_CHECK_FREQ = 10  # Check for drift every n generations
+DEGRADATION_THRESHOLD = 0.05  # Percentage decrease in performance to consider degradation
+RETRAINING_FREQ = 20  # Retrain models every n generations or when degradation detected
+
+# Setup Logging
+logging.basicConfig(filename='sense_log.txt', level=logging.DEBUG, format='%(asctime)s - %(levelname)s - %(message)s')
+
+# Data Source Handling
+def fetch_data_from_url(url: str) -> pd.DataFrame:
+    try:
+        response = requests.get(url)
+        response.raise_for_status()
+        return pd.read_csv(StringIO(response.text))
+    except Exception as e:
+        logging.error(f"Error fetching data from {url}: {e}")
+        return pd.DataFrame()
+
+def load_data_from_file(path: str) -> pd.DataFrame:
+    try:
+        return pd.read_csv(path)
+    except Exception as e:
+        logging.error(f"Error reading file from {path}: {e}")
+        return pd.DataFrame()
+
+# Data Preprocessing
+def preprocess_data(df: pd.DataFrame, target_column: str) -> Tuple[np.ndarray, np.ndarray]:
+    if df.empty:
+        logging.warning("Dataframe is empty, returning empty arrays.")
+        return np.array([]), np.array([])
+    
+    X = df.drop(columns=[target_column]).values
+    y = df[target_column].values
+    return X, y
+
+# Data Drift Detection
+def check_data_drift(new_data: np.ndarray, reference_data: np.ndarray) -> bool:
+    if len(new_data) == 0 or len(reference_data) == 0:
+        return False  # Not enough data to compare
+    
+    for i in range(new_data.shape[1]):
+        _, p_value = ks_2samp(new_data[:, i], reference_data[:, i])
+        if p_value < 0.05:  # Significant change in distribution
+            logging.warning(f"Data drift detected in feature {i}")
+            return True
+    return False
+
+# Model Monitoring
+def model_degradation(model: tf.keras.Model, validation_data: Tuple[np.ndarray, np.ndarray], baseline_score: float) -> bool:
+    current_score = model.evaluate(*validation_data, verbose=0)
+    performance_drop = (baseline_score - current_score) / baseline_score
+    if performance_drop > DEGRADATION_THRESHOLD:
+        logging.warning(f"Model degradation detected. Performance drop: {performance_drop:.2%}")
+        return True
+    return False
+
+# SARSA Agent with Epsilon-Greedy Strategy enhanced with regularization
 class SARSA_Agent:
-    def __init__(self, state_size, action_size, epsilon=0.1, gamma=0.95, alpha=0.1):
+    def __init__(self, state_size: int, action_size: int, epsilon: float=0.1, gamma: float=0.95, alpha: float=0.1):
         self.state_size = state_size
         self.action_size = action_size
         self.epsilon = epsilon
@@ -20,34 +93,34 @@ class SARSA_Agent:
 
     def _build_model(self):
         model = Sequential([
-            Dense(64, input_dim=self.state_size, activation='relu'),
+            Dense(64, input_dim=self.state_size, activation='relu', kernel_regularizer=l2(0.01)),
             Dropout(0.1),
-            Dense(64, activation='relu'),
+            Dense(64, activation='relu', kernel_regularizer=l2(0.01)),
             Dropout(0.1),
             Dense(self.action_size, activation='linear')
         ])
         model.compile(loss='mse', optimizer=tf.keras.optimizers.Adam(lr=self.alpha))
         return model
 
-    def choose_action(self, state):
+    def choose_action(self, state: np.ndarray) -> int:
         if tf.random.uniform(()) < self.epsilon:
             return random.randint(0, self.action_size - 1)
         else:
-            qs = self.model.predict(state[np.newaxis])
-            return np.argmax(qs[0])
+            qs = self.model.predict(state.reshape(1, -1))
+            return int(np.argmax(qs[0]))
 
-    def learn(self, state, action, reward, next_state, next_action, done):
+    def learn(self, state: np.ndarray, action: int, reward: float, next_state: np.ndarray, next_action: int, done: bool):
         target = reward
         if not done:
-            q_next = self.model.predict(next_state[np.newaxis])[0][next_action]
+            q_next = self.model.predict(next_state.reshape(1, -1))[0][next_action]
             target += self.gamma * q_next
-        target_f = self.model.predict(state[np.newaxis])
+        target_f = self.model.predict(state.reshape(1, -1))
         target_f[0][action] = target
-        self.model.fit(state[np.newaxis], target_f, epochs=1, verbose=0)
+        self.model.fit(state.reshape(1, -1), target_f, epochs=1, verbose=0)
 
 # Online Learning Module with LSTM for sequential data
 class OnlineLearningModule:
-    def __init__(self, input_dim, output_dim, sequence_length=100):
+    def __init__(self, input_dim: int, output_dim: int, sequence_length: int = 100):
         self.model = Sequential([
             LSTM(50, input_shape=(sequence_length, input_dim), return_sequences=True),
             Dropout(0.2),
@@ -56,20 +129,26 @@ class OnlineLearningModule:
             Dense(output_dim)
         ])
         self.model.compile(optimizer='adam', loss='mse')
+        self.sequence_length = sequence_length
 
-    def update_model(self, data, labels):
-        self.model.fit(data, labels, epochs=1, verbose=0)
+    def update_model(self, data: np.ndarray, labels: np.ndarray):
+        # Data should be reshaped for LSTM input
+        data = data.reshape(-1, self.sequence_length, data.shape[-1])
+        self.model.fit(data, labels, epochs=EPOCHS, batch_size=BATCH_SIZE, verbose=0)
+
+    def predict(self, data: np.ndarray) -> np.ndarray:
+        return self.model.predict(data.reshape(-1, self.sequence_length, data.shape[-1]))
 
 # Anomaly Detection using Autoencoder
 class AnomalyDetectionModule:
-    def __init__(self, input_dim, threshold=0.1):
+    def __init__(self, input_dim: int, threshold: float = 0.1):
         self.threshold = threshold
         self.model = self._build_model(input_dim)
         self.running_mean = None
         self.running_std = None
         self.count = 0
 
-    def _build_model(self, input_dim):
+    def _build_model(self, input_dim: int):
         model = Sequential([
             Dense(64, input_dim=input_dim, activation='relu'),
             Dense(32, activation='relu'),
@@ -80,7 +159,10 @@ class AnomalyDetectionModule:
         model.compile(optimizer='adam', loss='mse')
         return model
 
-    def detect(self, data_point):
+    def train(self, data: np.ndarray):
+        self.model.fit(data, data, epochs=EPOCHS, batch_size=BATCH_SIZE, verbose=0)
+
+    def detect(self, data_point: np.ndarray) -> bool:
         if self.running_mean is None or self.running_std is None:
             self.running_mean = data_point
             self.running_std = np.zeros_like(data_point)
@@ -99,78 +181,139 @@ class AnomalyDetectionModule:
             return np.any(is_anomaly)
         return False
 
-# System Resources Monitor
+# Enhanced System Resources Monitor with dynamic adjustment
 class SystemResourcesMonitor:
     def __init__(self):
         self.process = psutil.Process(os.getpid())
+        self.adjusted = False
 
     def report(self):
         cpu_usage = self.process.cpu_percent(interval=1.0)
         memory_usage = self.process.memory_percent()
+        if cpu_usage > 80 or memory_usage > 80:
+            if not self.adjusted:
+                logging.warning("High resource usage detected, reducing computational load.")
+                self.adjust_computational_load()
+                self.adjusted = True
+        else:
+            self.adjusted = False
+        logging.info(f"CPU Usage: {cpu_usage}%, Memory Usage: {memory_usage}%")
         print(f"CPU Usage: {cpu_usage}%, Memory Usage: {memory_usage}%")
 
-# Constants for SENSE
-MODEL_NAME = "gpt2"  # Example model, replace with actual model
-MAX_LENGTH = 512
-POPULATION_SIZE = 10
-MUTATION_RATE = 0.05
-SELECTION_TOP_K = 2
-DIVERSITY_RATE = 0.1
+    def adjust_computational_load(self):
+        global BATCH_SIZE
+        BATCH_SIZE = max(1, BATCH_SIZE // 2)  # Halve the batch size
+        logging.info(f"Adjusted batch size to: {BATCH_SIZE}")
 
-# SENSE Evolutionary Functions
-def mutate_model(model):
+# Diversity Measure for model selection
+def diversity_measure(model1: tf.keras.Model, model2: tf.keras.Model) -> float:
+    weights1 = model1.get_weights()
+    weights2 = model2.get_weights()
+    return sum([np.mean(np.abs(w1 - w2)) for w1, w2 in zip(weights1, weights2)])
+
+def select_diverse_models(population: List[tf.keras.Model], scores: List[float], k: int) -> List[tf.keras.Model]:
+    top_models = sorted(zip(population, scores), key=lambda x: x[1])[-k:]
+    diversity_score: Dict[tf.keras.Model, float] = {}
+    for model in population:
+        score = sum([diversity_measure(model, top[0]) for top in top_models])
+        diversity_score[model] = score
+    return [m for m, _ in sorted(diversity_score.items(), key=lambda x: x[1], reverse=True)[:SELECTION_TOP_K]]
+
+# Adaptive Mutation Strategy
+def adaptive_mutate_model(model: tf.keras.Model, performance_change: float) -> tf.keras.Model:
+    mutation_rate = MUTATION_RATE * (1 + performance_change)  # Increase if performance decreases
     for layer in model.layers:
         if hasattr(layer, 'kernel'):
-            mutation_mask = tf.cast(tf.random.uniform(layer.kernel.shape) < MUTATION_RATE, tf.float32)
+            mutation_mask = tf.cast(tf.random.uniform(layer.kernel.shape) < mutation_rate, tf.float32)
             layer.kernel.assign_add(mutation_mask * tf.random.normal(layer.kernel.shape, stddev=0.01))
     return model
 
-def crossover_model(parent1, parent2):
+# Smart Crossover Strategy
+def smart_crossover(parent1: tf.keras.Model, parent2: tf.keras.Model) -> tf.keras.Model:
     child_model = tf.keras.models.clone_model(parent1)
     child_weights = parent1.get_weights()
     parent2_weights = parent2.get_weights()
     
     for i in range(len(child_weights)):
-        crossover_point = random.randint(0, child_weights[i].size)
-        child_weights[i].flat[:crossover_point] = parent2_weights[i].flat[:crossover_point]
+        prob = 0.7 if parent1.evaluate(...) < parent2.evaluate(...) else 0.3  # Placeholder for actual performance comparison
+        crossover_mask = tf.random.uniform(child_weights[i].shape) < prob
+        child_weights[i] = tf.where(crossover_mask, child_weights[i], parent2_weights[i])
 
     child_model.set_weights(child_weights)
     return child_model
 
-def select_top_models(population, scores, k):
-    top_indices = np.argsort(scores)[-k:]
-    return [population[i] for i in top_indices]
-
-# SENSE Model Evolver incorporating SARSA agent and Online Learning
+# Enhanced SENSE Model Evolver
 class SENSE_Evolver:
-    def __init__(self, state_size, action_size, input_dim, output_dim, epsilon=0.1, gamma=0.95, alpha=0.1):
+    def __init__(self, state_size: int, action_size: int, input_dim: int, output_dim: int, epsilon: float=0.1, gamma: float=0.95, alpha: float=0.1):
         self.sarsa_agent = SARSA_Agent(state_size, action_size, epsilon, gamma, alpha)
         self.online_learning = OnlineLearningModule(input_dim, output_dim)
         self.tokenizer = AutoTokenizer.from_pretrained(MODEL_NAME)
-        self.base_model = TFAutoModelForCausalLM.from_pretrained(MODEL_NAME)
+        self.base_model = self._initialize_base_model()
+        self.baseline_score = float('inf')  # Will be set to first evaluation score
+        self.generation_count = 0
 
-    def create_population(self):
+    def _initialize_base_model(self) -> tf.keras.Model:
+        model = TFAutoModelForCausalLM.from_pretrained(MODEL_NAME)
+        optimizer = AdamW(learning_rate=5e-5, weight_decay=0.01)
+        model.compile(optimizer=optimizer, loss=tf.keras.losses.SparseCategoricalCrossentropy(from_logits=True))
+        return model
+
+    def create_population(self) -> List[tf.keras.Model]:
         return [tf.keras.models.clone_model(self.base_model) for _ in range(POPULATION_SIZE)]
 
-    def evolve_population(self, population, validation_data):
+    def evolve_population(self, population: List[tf.keras.Model], validation_data: Tuple[np.ndarray, np.ndarray], new_data: np.ndarray) -> Tuple[List[tf.keras.Model], float]:
+        self.generation_count += 1
+
+        # Check for data drift if it's time
+        if self.generation_count % DRIFT_CHECK_FREQ == 0:
+            reference_data = validation_data[0]  # Assuming first element of tuple is input data
+            if check_data_drift(new_data, reference_data):
+                logging.info("Data drift detected, initiating adaptive retraining.")
+                population = self.create_population()  # Reset with new models
+
+        # Evaluate models
         scores = [self.evaluate(model, validation_data) for model in population]
-        selected_models = select_top_models(population, scores, SELECTION_TOP_K)
+        
+        # Set baseline if it's the first evaluation
+        if self.baseline_score == float('inf'):
+            self.baseline_score = min(scores)
+        
+        # Check for model degradation on the best model
+        if model_degradation(population[0], validation_data, self.baseline_score):
+            logging.info("Model degradation detected, initiating retraining.")
+            population = self.create_population()  # Reset with new models
+
+        # Evolution logic
+        selected_models = select_diverse_models(population, scores, SELECTION_TOP_K)
         new_population = selected_models.copy()
 
         while len(new_population) < POPULATION_SIZE:
             parent1, parent2 = random.sample(selected_models, 2)
-            child = crossover_model(parent1, parent2)
-            child = mutate_model(child)
+            child = smart_crossover(parent1, parent2)
+            performance_change = (np.mean(scores) - min(scores)) / (max(scores) - min(scores))  # Normalize performance change
+            child = adaptive_mutate_model(child, performance_change)
             new_population.append(child)
 
-        return new_population
+        best_score = min(scores)  # Assuming lower score means better performance
+        if self.generation_count % RETRAINING_FREQ == 0:
+            logging.info("Scheduled retraining initiated.")
+            population = self.create_population()  # Reset with new models
 
-    def evaluate(self, model, validation_data):
-        return model.evaluate(validation_data)[0]
+        return new_population, best_score
 
-# Main function to run SENSE
+    def evaluate(self, model: tf.keras.Model, validation_data: Tuple[np.ndarray, np.ndarray]) -> float:
+        try:
+            loss = model.evaluate(validation_data[0], validation_data[1], batch_size=BATCH_SIZE, verbose=0)
+            return loss  # Lower loss is better
+        except Exception as e:
+            logging.error(f"Error evaluating model: {e}")
+            return float('inf')  # Return high value for errors
+
+# Main function to run SENSE autonomously
 def main():
     parser = argparse.ArgumentParser(description='SENSE: Systematic Enhancement for Neural Selection and Evolution')
+    parser.add_argument('--data_source', type=str, required=True, help='Path or URL to data source')
+    parser.add_argument('--target_column', type=str, required=True, help='Name of the target column in dataset')
     parser.add_argument('--state_size', type=int, default=10, help='Size of the state representation for SARSA Agent')
     parser.add_argument('--action_size', type=int, default=4, help='Number of actions for SARSA Agent')
     parser.add_argument('--input_dim', type=int, default=10, help='Input dimension for Online Learning Module')
@@ -181,64 +324,76 @@ def main():
     parser.add_argument('--sequence_length', type=int, default=100, help='Sequence length for Online Learning Module')
     parser.add_argument('--anomaly_input_dim', type=int, default=10, help='Input dimension for Anomaly Detection Module')
     parser.add_argument('--anomaly_threshold', type=float, default=0.1, help='Threshold for anomaly detection')
+    parser.add_argument('--drift_check_frequency', type=int, default=DRIFT_CHECK_FREQ, help='Frequency to check for data drift')
+    parser.add_argument('--degradation_threshold', type=float, default=DEGRADATION_THRESHOLD, help='Threshold for model degradation detection')
+    parser.add_argument('--retraining_frequency', type=int, default=RETRAINING_FREQ, help='Frequency for scheduled retraining')
 
     args = parser.parse_args()
+
+    # Data Handling
+    if args.data_source.startswith('http'):
+        df = fetch_data_from_url(args.data_source)
+    else:
+        df = load_data_from_file(args.data_source)
+
+    if df.empty:
+        logging.error("Failed to load data. Exiting.")
+        return
+
+    X, y = preprocess_data(df, args.target_column)
+
+    # Adjust dimensions dynamically based on actual data
+    args.input_dim = X.shape[1]
+    args.output_dim = y.shape[1] if len(y.shape) > 1 else 1
 
     # Initialize SENSE components
     sarsa_agent = SARSA_Agent(args.state_size, args.action_size, args.epsilon, args.gamma, args.alpha)
     online_learning_module = OnlineLearningModule(args.input_dim, args.output_dim, args.sequence_length)
-    anomaly_detection_module = AnomalyDetectionModule(args.anomaly_input_dim, args.anomaly_threshold)
+    anomaly_detection_module = AnomalyDetectionModule(args.input_dim, args.anomaly_threshold)
     system_resources_monitor = SystemResourcesMonitor()
 
     # Initialize SENSE Evolver
     evolver = SENSE_Evolver(args.state_size, args.action_size, args.input_dim, args.output_dim, args.epsilon, args.gamma, args.alpha)
 
-    # Create initial population of models
+    # Prepare data splits
+    split = int(0.8 * len(X))
+    train_X, val_X = X[:split], X[split:]
+    train_y, val_y = y[:split], y[split:]
+    validation_data = (val_X, val_y)
+
+    # Evolution Loop with drift and degradation handling
     population = evolver.create_population()
+    best_score = float('inf')
+    
+    for generation in range(GENERATIONS):
+        logging.info(f"Generation {generation + 1}/{GENERATIONS}")
+        population, current_best_score = evolver.evolve_population(population, validation_data, train_X)
+        
+        if current_best_score < best_score:
+            best_score = current_best_score
+            logging.info(f"New best score: {best_score}")
 
-    # Placeholder for validation data
-    validation_data = None  # Replace with actual validation data
+        # Monitor system resources
+        system_resources_monitor.report()
 
-    # Evolve the population
-    print("Evolving the population of models...")
-    new_population = evolver.evolve_population(population, validation_data)
+        # Update online learning and anomaly detection with new data
+        online_learning_module.update_model(train_X, train_y)
+        anomaly_detection_module.train(train_X)
 
-    # Report on the new population
-    print("Evolution complete. New population size:", len(new_population))
+        # Detect anomalies in validation data
+        anomalies = sum(1 for data_point in val_X if anomaly_detection_module.detect(data_point))
+        logging.info(f"Detected {anomalies} anomalies in validation data.")
 
-    # Monitor system resources
-    system_resources_monitor.report()
+    # Final evaluation with the best model
+    best_model = population[0]  # Assuming the first model in the list is the best after sorting by score
+    final_performance = evolver.evaluate(best_model, validation_data)
+    logging.info(f"Final model performance: {final_performance}")
 
-    # Additional application logic
-    print("Performing additional tasks with the evolved models...")
+    # Make predictions with the best model
+    predictions = online_learning_module.predict(val_X)
+    logging.info(f"Sample prediction: {predictions[0]}")
 
-    # Placeholder for training and evaluation data
-    training_data = None  # Replace with actual training data
-    evaluation_data = None  # Replace with actual evaluation data
-
-    # Further training of the evolved models
-    for model in new_population:
-        # Placeholder for the training process
-        print(f"Training model {model.name}...")
-        # model.train(training_data) # Replace with actual training logic
-
-    # Evaluation of the evolved models
-    for model in new_population:
-        # Placeholder for the evaluation process
-        print(f"Evaluating model {model.name}...")
-        # performance = model.evaluate(evaluation_data) # Replace with actual evaluation logic
-        # print(f"Model {model.name} Performance: {performance}")
-
-    # Application-specific task: Making predictions
-    # Placeholder for prediction data
-    prediction_data = None  # Replace with actual prediction data
-
-    for model in new_population:
-        print(f"Making predictions with model {model.name}...")
-        # predictions = model.predict(prediction_data) # Replace with actual prediction logic
-        # print(f"Predictions made by model {model.name}: {predictions}")
-
-    print("SENSE application tasks complete.")
+    logging.info("SENSE autonomous evolution and learning process completed, with drift and degradation handling.")
 
 if __name__ == "__main__":
     main()
