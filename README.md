@@ -101,7 +101,7 @@ SENSE is released under the MIT License. For more details, see the License file.
 ---
 
 ## Detailed Documentation  
-COMING SOON  
+Check the WIKI
 
 ---
 
